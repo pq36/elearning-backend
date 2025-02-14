@@ -274,35 +274,50 @@ export const getCoursesByInstructor = async (req, res) => {
   };
   
   export const enrollStudentInCourses = async (req, res) => {
-    const { studentId } = req.params;
-    const { courseIds } = req.body; // Expect an array of course IDs
-  
     try {
-      // Fetch the student by studentId
-      const student = await Student.findOne({ studentId });
+      const token = req.headers.authorization?.split(" ")[1];
+      if (!token) {
+        return res.status(401).json({ message: "Unauthorized. No token provided." });
+      }
   
+      let decoded;
+      try {
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+      } catch (err) {
+        return res.status(401).json({ message: "Invalid or expired token." });
+      }
+  
+      const { studentId } = req.params;
+      const { courseIds } = req.body; // Expect an array of course IDs
+  
+      if (!Array.isArray(courseIds) || courseIds.length === 0) {
+        return res.status(400).json({ message: "Invalid course IDs provided." });
+      }
+  
+      // Fetch the student by studentId
+      const student = await Student.findById(studentId);
       if (!student) {
         return res.status(404).json({ message: "Student not found." });
       }
   
       // Fetch the courses by courseIds
-      const courses = await Course.find({ '_id': { $in: courseIds } });
-  
+      const courses = await Course.find({ _id: { $in: courseIds } });
       if (courses.length !== courseIds.length) {
         return res.status(404).json({ message: "Some courses were not found." });
       }
   
-      // Add courses to the student's enrolledCourses array
-      student.enrolledCourses = [...student.enrolledCourses, ...courses.map(course => course._id)];
-      await student.save();
+      // Add new courses to the student's enrolledCourses (avoiding duplicates)
+      await Student.updateOne(
+        { _id: studentId },
+        { $addToSet: { enrolledCourses: { $each: courseIds } } }
+      );
   
-      res.status(200).json({ message: "Student successfully enrolled in courses.", student });
+      res.status(200).json({ message: "Student successfully enrolled in courses." });
     } catch (err) {
       console.error("Error enrolling student in courses:", err);
       res.status(500).json({ message: "Server error" });
     }
   };
-  
   // Controller to get all enrolled courses of a student
   export const getStudentEnrolledCourses = async (req, res) => {
     const { studentId } = req.params;
@@ -323,17 +338,17 @@ export const getCoursesByInstructor = async (req, res) => {
   };
 
   export const enrollStudentInCourse = async (req, res) => {
-    const { courseId } = req.body; // The course ID to enroll in
-    const token = req.headers.authorization?.split(" ")[1]; // Extract JWT from Authorization header
+    const { courseId } = req.body;
+    const token = req.headers.authorization?.split(" ")[1]; // Extract JWT token
   
     if (!token) {
-      return res.status(400).json({ message: "No token provided." });
+      return res.status(401).json({ message: "No token provided." });
     }
   
     try {
-      // Verify JWT and extract student ID
+      // Verify JWT and extract user ID
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const studentId = decoded.studentId;
+      const instructorId = decoded.id; // Instructor ID acts as studentId
   
       // Check if course exists
       const course = await Course.findById(courseId);
@@ -341,13 +356,19 @@ export const getCoursesByInstructor = async (req, res) => {
         return res.status(404).json({ message: "Course not found." });
       }
   
-      // Fetch the student and enroll in the course
-      const student = await Student.findById(studentId);
+      // Check if student entry exists (create if not)
+      let student = await Student.findOne({ studentId: instructorId });
+  
       if (!student) {
-        return res.status(404).json({ message: "Student not found." });
+        student = new Student({ studentId: instructorId, enrolledCourses: [] });
       }
   
-      // Enroll the student (assuming you are storing course IDs in an array of enrolledCourses)
+      // Prevent duplicate enrollments
+      if (student.enrolledCourses.includes(course._id)) {
+        return res.status(400).json({ message: "Already enrolled in this course." });
+      }
+  
+      // Enroll student
       student.enrolledCourses.push(course._id);
       await student.save();
   
@@ -357,3 +378,75 @@ export const getCoursesByInstructor = async (req, res) => {
       res.status(500).json({ message: "Server error" });
     }
   };
+  export const getAllCourses = async (req, res) => {
+    try {
+      const courses = await Course.find();
+  
+      if (courses.length === 0) {
+        console.log("No courses found"); // Debug log
+        return res.status(404).json({ message: "No courses found" });
+      }
+  
+      console.log("Courses fetched successfully", courses); // Debug log
+      res.status(200).json({ courses });
+    } catch (err) {
+      console.error("Error fetching courses:", err); // Debug log
+      res.status(500).json({ message: "Server error" });
+    }
+  };
+
+  export const getEnrolledCourses = async (req, res) => {
+    const token = req.headers.authorization?.split(" ")[1];
+  
+    if (!token) {
+      return res.status(401).json({ message: "No token provided." });
+    }
+  
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const instructorId = decoded.id;
+  
+      const student = await Student.findOne({ studentId: instructorId });
+  
+      if (!student) {
+        return res.status(200).json({ enrolledCourses: [] });
+      }
+  
+      console.log("Enrolled Courses:", student.enrolledCourses); // Debugging
+      res.status(200).json({ enrolledCourses: student.enrolledCourses });
+    } catch (err) {
+      console.error("Error fetching enrolled courses:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  };
+  
+  export const checkEnrollment = async (req, res) => {
+    const { courseId } = req.params; // Course ID from request URL
+    const token = req.headers.authorization?.split(" ")[1]; // Extract JWT token
+  
+    if (!token) {
+      return res.status(401).json({ message: "No token provided." });
+    }
+  
+    try {
+      // Verify JWT and get instructor ID (acting as studentId)
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const instructorId = decoded.id;
+  
+      // Find student record
+      const student = await Student.findOne({ studentId: instructorId });
+  
+      if (!student) {
+        return res.status(200).json({ enrolled: false, message: "Not enrolled" });
+      }
+  
+      // Check if the course is in the enrolledCourses list
+      const isEnrolled = student.enrolledCourses.includes(courseId);
+  
+      return res.status(200).json({ enrolled: isEnrolled, message: isEnrolled ? "Already enrolled" : "Not enrolled" });
+    } catch (err) {
+      console.error("Error checking enrollment:", err);
+      res.status(500).json({ message: "Server error" });
+    }
+  };
+  

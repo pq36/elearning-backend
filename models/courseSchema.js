@@ -33,9 +33,13 @@ const courseSchema = new mongoose.Schema(
     studentsEnrolled: [
       {
         type: mongoose.Schema.Types.ObjectId,
-        ref: "Student", 
+        ref: "Student",
       },
     ],
+    views: {
+      type: Number,
+      default: 0, // ✅ Track number of times the course page is visited
+    },
     createdAt: {
       type: Date,
       default: Date.now,
@@ -46,9 +50,8 @@ const courseSchema = new mongoose.Schema(
     },
   },
   {
-    timestamps: true, 
+    timestamps: true,
   }
 );
 
-export default mongoose.model("Course",courseSchema)
-
+export default mongoose.model("Course", courseSchema);

@@ -4,9 +4,9 @@ import mongoose from "mongoose";
 const studentSchema = new mongoose.Schema(
     {
       studentId: {
-        type: String,
-        required: true,
-        unique: true, // Ensure each student has a unique ID
+        type: mongoose.Schema.Types.ObjectId,
+      ref: "Instructor", // Reference to the Student model
+      required: true,
       },
       enrolledCourses: [
         {
